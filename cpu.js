@@ -1,7 +1,12 @@
-import {uint8,operaCodes} from './common/types'
+import {
+    uint8,
+} from './common/types'
 import ALU from './alu'
-import Raw from './raw'
+// import Raw from './raw'
 import controlUnit from './controlUnit'
+import {
+    CPU_EVENTS
+} from './common/events';
 
 class cpu {
     constructor() {
@@ -13,13 +18,8 @@ class cpu {
         this.ALU = new ALU();
 
         this.controlUnit = new controlUnit(this.ALU.getFlags());
-
-        //instruction register
-        //指令寄存器
-        this.instRegister = uint8();
-        //instruction address register
-        //指令地址寄存器
-        this.instAddrRegister = uint8();
+        //时钟以精确的间隔触发电信号,控制单元用此信号来推进CPU工作
+        this.clock = null;
     }
 
     /**
@@ -28,8 +28,9 @@ class cpu {
      * 并将此值存储在指令寄存器中
      */
     fetchPhase() {
-        // this.controlUnit.doGetInstVal();
-        this.instRegister = Raw.get(this.instAddrRegister);
+        const addr = this.controlUnit.getInstAddressRegisterVal();
+        const instVal = this.controlUnit.getValByRaw(addr);
+        this.controlUnit.setInstRegister(instVal);
     }
 
     /**
@@ -37,14 +38,7 @@ class cpu {
      * 根据指令寄存器中的值确定操作码
      */
     decodePhase() {
-        let mask = ~uint8();
-        // let instVal = this.controlUnit.getInstVal();
-        let instVal = this.instRegister;
-        let operaCode;
-        mask = mask<<4;
-        operaCode = instVal & mask;
-        operaCode = operaCode>>>4;
-        return operaCode;
+        return this.controlUnit.getOpcodeByInstRegisterVal();
     }
 
     /**
@@ -53,34 +47,71 @@ class cpu {
      * 最后将指令地址寄存器的值加1
      * 结束一个周期,这个周期(fetch->decode->execute->instAddrRegister++)称为时钟速度
      */
-    executePhase(operaCode) {
-        const {ADD,SUB,LOAD_A,LOAD_B} = operaCodes;
-        switch(operaCode){
-            case ADD:
-            case SUB:
-           this.computeByALU(operaCode);
-            break;
-            case LOAD_A:
-            break;
-            case LOAD_B:
-            break;
+    executePhase(opcode) {
+
+        const event = this.controlUnit.executeByOpcode(opcode);
+
+        const {
+            COMPUTE_BY_ALU,
+            SET_REGISTER
+        } = CPU_EVENTS;
+
+        /** 
+         * Control Unit select the right register to pass in as input,
+         * and configuring the ALU to perform the right operation
+         */
+        if (event.type === COMPUTE_BY_ALU) {
+            const payload = event.payload;
+            const ret = this.computeByALU(payload.opcode, payload.lhs, payload.rhs);
+            /**
+             * 将结果缓存,
+             * 没有直接更新到目标寄存器是防止ALU一直重复当前操作
+             */
+            this.controlUnit.setTmpRegister(ret);
+            /**
+             * 配置ALU后,将缓存结果更新到目标寄存器
+             */
+            this.controlUnit.setRegister(payload.dest, this.getTmpRegisterVal())
+        } else if (event.type === SET_REGISTER) {
+            this.setRegister(event.payload.addr, event.payload.value);
         }
-        //do something
-        this.instAddrRegister++;
+
         //end
+        const addr = this.controlUnit.getInstAddressRegisterVal();
+        this.controlUnit.setInstAddressRegister(addr + 1);
     }
 
-    computeByALU(operaCode){
-        const inputMask = (~uint8())>>>4;
-        const inputBMask = inputMask >>> 2;
-        const inputAMask = inputB <<2;
-        const input = this.instRegister & inputMask;
-        const inputA = input & inputAMask;
-        const inputB = input & inputBMask;
+    run(){
+        //will crashed
+        let flag = true;
+        while(flag){
+            this.fetchPhase();
+            let opcode = this.decodePhase();
+            this.executePhase(opcode);
+        }
+    }
 
-        this.ALU.compute(operaCode,inputA,inputB);
+    computeByALU(opcode, lhs, rhs) {
+
+        const ret = this.ALU.compute(opcode, lhs, rhs);
         this.controlUnit.setFlags(this.ALU.getFlags());
+        return ret;
     }
 
-
+    setRegister(addr, val) {
+        switch (addr) {
+            case 0:
+                this.registerA = val;
+                break;
+            case 1:
+                this.registerB = val;
+                break;
+            case 2:
+                this.registerC = val;
+                break;
+            case 3:
+                this.registerD = val;
+                break;
+        }
+    }
 }
