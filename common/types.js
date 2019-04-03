@@ -1,8 +1,9 @@
 export const OPCODES = {
-    ADD: '~A',
-    SUB: '~S',
-    LOAD_A: 'LOAD_A',
-    LOAD_B: 'B'
+    LOAD_A: 0010,   //read RAW location into register A
+    LOAD_B: 0001,
+    STORE_A: 0100,
+    ADD: 1000,
+    SUB: 1010
 }
 
 export const uint8 = function () {
