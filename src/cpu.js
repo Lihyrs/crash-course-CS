@@ -1,5 +1,6 @@
 import {
     uint8,
+    OPCODES,
 } from './common/types'
 import ALU from './alu'
 // import Raw from './raw'
@@ -20,6 +21,7 @@ class cpu {
         this.controlUnit = new controlUnit(this.ALU.getFlags());
         //时钟以精确的间隔触发电信号,控制单元用此信号来推进CPU工作
         this.clock = null;
+        this.status = 0;
     }
 
     /**
@@ -53,8 +55,14 @@ class cpu {
 
         const {
             COMPUTE_BY_ALU,
-            SET_REGISTER
+            SET_REGISTER,
         } = CPU_EVENTS;
+
+        const {
+            JUMP,
+            JUMP_NEG,
+            HALF
+        } = OPCODES;
 
         /** 
          * Control Unit select the right register to pass in as input,
@@ -62,18 +70,30 @@ class cpu {
          */
         if (event.type === COMPUTE_BY_ALU) {
             const payload = event.payload;
+            this.ALU.reset();
             const ret = this.computeByALU(payload.opcode, payload.lhs, payload.rhs);
             /**
              * 将结果缓存,
              * 没有直接更新到目标寄存器是防止ALU一直重复当前操作
              */
-            this.controlUnit.setTmpRegister(ret);
+            this.controlUnit.setTmpRegisterVal(ret);
             /**
              * 配置ALU后,将缓存结果更新到目标寄存器
              */
-            this.controlUnit.setRegister(payload.dest, this.getTmpRegisterVal())
+            this.setRegister(payload.des, this.controlUnit.getTmpRegisterVal())
         } else if (event.type === SET_REGISTER) {
-            this.setRegister(event.payload.addr, event.payload.value);
+            this.setRegister(event.payload.address, event.payload.value);
+        } else if (event.type === JUMP) {
+            this.controlUnit.setInstAddressRegister(event.payload.address)
+        } else if (event.type === JUMP_NEG) {
+            const flags = this.controlUnit.getALUFlags();
+            if (flags.negative) {
+                this.controlUnit.setInstAddressRegister(event.payload.address)
+            } else {
+                //do nothing
+            }
+        } else if (event.type === HALF) {
+            this.status = 0;
         }
 
         //end
@@ -81,20 +101,34 @@ class cpu {
         this.controlUnit.setInstAddressRegister(addr + 1);
     }
 
-    run(){
-        //will crashed
-        let flag = true;
-        while(flag){
+    run() {
+        console.log(this)
+        this.status = 1;
+        while (this.status) {
             this.fetchPhase();
             let opcode = this.decodePhase();
             this.executePhase(opcode);
+            console.log(this)
         }
     }
 
-    computeByALU(opcode, lhs, rhs) {
+    init({
+        raw
+    }) {
+        this.controlUnit.connectRaw(raw);
+    }
 
-        const ret = this.ALU.compute(opcode, lhs, rhs);
-        this.controlUnit.setFlags(this.ALU.getFlags());
+    computeByALU(opcode, lhs, rhs) {
+        const input = {
+            lhs: this.getRegisterVal(lhs),
+            rhs: this.getRegisterVal(rhs)
+        }
+        const ret = this.ALU.compute(opcode,input.lhs,input.rhs);
+        const flags = this.ALU.getFlags();
+        if (flags.overflow) {
+            console.log("overflow: ${lhs} ${rhs}")
+        }
+        this.controlUnit.setALUFlags(this.ALU.getFlags());
         return ret;
     }
 
@@ -112,6 +146,32 @@ class cpu {
             case 3:
                 this.registerD = val;
                 break;
+            default:
+                throw new Error('unexpected register')
         }
     }
+
+    getRegisterVal(addr){
+        let ret;
+        switch (addr) {
+            case 0:
+               ret = this.registerA;
+                break;
+            case 1:
+               ret = this.registerB;
+                break;
+            case 2:
+               ret = this.registerC;
+                break;
+            case 3:
+               ret = this.registerD;
+                break;
+            default:
+                throw new Error('unexpected register')
+        }
+
+        return ret;
+    }
 }
+
+export default cpu;
